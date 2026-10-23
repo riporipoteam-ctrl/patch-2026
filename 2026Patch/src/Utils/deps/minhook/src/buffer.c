@@ -32,8 +32,10 @@
 // Size of each memory block. (= page size of VirtualAlloc)
 #define MEMORY_BLOCK_SIZE 0x1000
 
-// Max range for seeking a memory block. (= 1024MB)
-#define MAX_MEMORY_RANGE 0x40000000
+// The March 2026 client can reserve the nearest 1 GiB around GameAssembly.
+// Keep trampoline allocation inside signed rel32 reach, while allowing
+// MinHook to search a wider 1.75 GiB radius for a free executable page.
+#define MAX_MEMORY_RANGE 0x70000000
 
 // Memory protection flags to check the executable address.
 #define PAGE_EXECUTE_FLAGS \
