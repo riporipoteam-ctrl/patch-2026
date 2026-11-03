@@ -727,22 +727,36 @@ namespace RR::Patches {
                                    nullptr, nullptr) == bytes;
     }
     static void (*roomieUriCtorOriginal)(void*, void*, void*) = nullptr;
+    static LONG roomieUriObserved = 0;
+    static LONG roomieUriRedirected = 0;
     static void RoomieUriCtor(void* instance, void* text, void* method) {
-        // On the fingerprinted client, the live Roomie trace reached this
-        // constructor with the provider's base origin. Keep this opt-in until
-        // the configured service supports the complete realtime handshake.
+        // Roomie uses the normal HTTPS endpoint. Some client code spells the
+        // default TLS port explicitly; normalize that authority too, while
+        // preserving the original path, query and fragment byte-for-byte.
         try {
             std::string value;
             RR::Config::Url url;
-            if (StringUtf8(text, value) && RR::Config::ParseUrl(value, url) && url.scheme == "https" &&
-                url.host == "api.openai.com" && url.port.empty() &&
-                (url.authorityEnd == value.size() || value[url.authorityEnd] == '?' ||
-                 value.compare(url.authorityEnd, 12, "/v1/realtime") == 0 ||
-                 value.substr(url.authorityEnd) == "/")) {
+            if (StringUtf8(text, value) && RR::Config::ParseUrl(value, url)) {
+                const bool provider = url.scheme == "https" && url.host == "api.openai.com";
+                const bool defaultTlsPort = url.port.empty() || url.port == "443";
+                const bool realtimeRoute = url.authorityEnd == value.size() || value[url.authorityEnd] == '?' ||
+                                           value.compare(url.authorityEnd, 12, "/v1/realtime") == 0 ||
+                                           value.substr(url.authorityEnd) == "/";
+                if (provider && InterlockedCompareExchange(&roomieUriObserved, 1, 0) == 0) {
+                    Log("[Roomie] realtime URI observed explicit_tls_port=%d route_match=%d",
+                        url.port.empty() ? 0 : 1, realtimeRoute ? 1 : 0);
+                }
+                if (!provider || !defaultTlsPort || !realtimeRoute) {
+                    roomieUriCtorOriginal(instance, text, method);
+                    return;
+                }
                 std::string replacement = value;
                 replacement.replace(url.authorityStart, url.authorityEnd - url.authorityStart,
                                     networkConfig.roomieRealtimeHost);
                 if (void* rewritten = stringNew(replacement.c_str())) {
+                    if (InterlockedCompareExchange(&roomieUriRedirected, 1, 0) == 0) {
+                        Log("[Roomie] realtime URI redirected to configured worker");
+                    }
                     roomieUriCtorOriginal(instance, rewritten, method);
                     return;
                 }
