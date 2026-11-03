@@ -733,10 +733,15 @@ namespace RR::Patches {
         // the configured service supports the complete realtime handshake.
         try {
             std::string value;
-            if (StringUtf8(text, value) &&
-                (value == "https://api.openai.com" || value == "https://api.openai.com/")) {
-                const std::string replacement =
-                    "https://" + networkConfig.roomieRealtimeHost + (value.back() == '/' ? "/" : "");
+            RR::Config::Url url;
+            if (StringUtf8(text, value) && RR::Config::ParseUrl(value, url) && url.scheme == "https" &&
+                url.host == "api.openai.com" && url.port.empty() &&
+                (url.authorityEnd == value.size() || value[url.authorityEnd] == '?' ||
+                 value.compare(url.authorityEnd, 12, "/v1/realtime") == 0 ||
+                 value.substr(url.authorityEnd) == "/")) {
+                std::string replacement = value;
+                replacement.replace(url.authorityStart, url.authorityEnd - url.authorityStart,
+                                    networkConfig.roomieRealtimeHost);
                 if (void* rewritten = stringNew(replacement.c_str())) {
                     roomieUriCtorOriginal(instance, rewritten, method);
                     return;
