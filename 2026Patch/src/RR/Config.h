@@ -71,12 +71,14 @@ namespace RR::Config {
         if (!ReadIni(path, L"ApiHost", settings.network.apiHost) ||
             !ReadIni(path, L"ServerDomain", settings.network.serverDomain) ||
             !ReadIni(path, L"CachedServerDomain", settings.network.cachedServerDomain) ||
+            !ReadIni(path, L"RoomieRealtimeHost", settings.network.roomieRealtimeHost) ||
             !ReadIni(path, L"VoiceKeyXml", settings.voiceKeyXml)) {
             error = "A configuration setting is too long or contains invalid text.";
             return false;
         }
         settings.network.serverDomain = Lower(settings.network.serverDomain);
         settings.network.cachedServerDomain = Lower(settings.network.cachedServerDomain);
+        settings.network.roomieRealtimeHost = Lower(settings.network.roomieRealtimeHost);
         if (!settings.network.Valid()) {
             error = "When supplied, ApiHost must be a host name or HTTP(S) origin and ServerDomain a valid "
                     "service domain covering it.";
