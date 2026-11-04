@@ -96,7 +96,7 @@ namespace RR::Config {
     }
 
     struct Network {
-        std::string apiHost, serverDomain, cachedServerDomain;
+        std::string apiHost, serverDomain, cachedServerDomain, roomieRealtimeHost;
         bool disableCertificatePinning = false;
         bool allowUnsignedImages = false;
 
@@ -114,6 +114,12 @@ namespace RR::Config {
                 (!ParseUrl(origin, url) || (url.scheme != "https" && url.scheme != "http") ||
                  url.authorityEnd != origin.size())) {
                 return false;
+            }
+            if (!roomieRealtimeHost.empty()) {
+                if (!Host(roomieRealtimeHost) || serverDomain.empty() ||
+                    !InDomain(roomieRealtimeHost, serverDomain)) {
+                    return false;
+                }
             }
             return (serverDomain.empty() || Host(serverDomain)) &&
                    (apiHost.empty() || serverDomain.empty() || InDomain(url.host, serverDomain)) &&
@@ -152,6 +158,24 @@ namespace RR::Config {
                 return true;
             }
             return false;
+        }
+
+        // Roomie's realtime request is built from the provider origin in some
+        // client paths and as a complete URL in others. Rewrite only the
+        // authority, preserving the client's exact path, query and fragment.
+        // This is deliberately separate from ApiHost: it must never redirect
+        // ordinary requests to the realtime service.
+        bool RewriteRoomieRealtime(std::string& value) const {
+            if (roomieRealtimeHost.empty()) {
+                return false;
+            }
+            Url url;
+            if (!ParseUrl(value, url) || url.host != "api.openai.com" ||
+                (url.scheme != "https" && url.scheme != "wss")) {
+                return false;
+            }
+            value.replace(url.authorityStart, url.authorityEnd - url.authorityStart, roomieRealtimeHost);
+            return true;
         }
 
         bool Owns(const std::string& value) const {

@@ -726,6 +726,25 @@ namespace RR::Patches {
         return WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, chars, length, output.data(), bytes,
                                    nullptr, nullptr) == bytes;
     }
+    static void (*roomieUriCtorOriginal)(void*, void*, void*) = nullptr;
+    static void RoomieUriCtor(void* instance, void* text, void* method) {
+        // Realtime URLs may be constructed from the provider origin or as a
+        // complete /v1/realtime/calls URL. Rewrite only the configured host,
+        // retaining the path and signed query exactly.
+        try {
+            std::string value;
+            if (StringUtf8(text, value) && networkConfig.RewriteRoomieRealtime(value)) {
+                if (void* rewritten = stringNew(value.c_str())) {
+                    roomieUriCtorOriginal(instance, rewritten, method);
+                    Log("[Roomie] realtime URI host redirected to configured worker");
+                    return;
+                }
+            }
+        } catch (...) {
+            LogVerbose("[Roomie] URI redirect failed; original retained");
+        }
+        roomieUriCtorOriginal(instance, text, method);
+    }
     // Runtime schema and disassembly verify this static signature on 20260323.14.
     // Observe the reason before the client discards its message; preserve shutdown.
     static void (*fatalQuitOriginal)(int, void*, void*) = nullptr;
@@ -1019,7 +1038,10 @@ namespace RR::Patches {
         } else {
             Log("[DesktopCapture] Windows capture initialization failed");
         }
-        if (!Hook(RR::Methods::HTTP::SendRequest, reinterpret_cast<void*>(Send),
+        if ((!networkConfig.roomieRealtimeHost.empty() &&
+             !Hook(RR::Methods::Uri::Constructor, reinterpret_cast<void*>(RoomieUriCtor),
+                   reinterpret_cast<void**>(&roomieUriCtorOriginal), "Roomie.RealtimeOrigin")) ||
+            !Hook(RR::Methods::HTTP::SendRequest, reinterpret_cast<void*>(Send),
                   reinterpret_cast<void**>(&sendOriginal), "HTTPManager.SendRequest") ||
             !Hook(RR::Methods::HTTP::NotifyServerCertificate, reinterpret_cast<void*>(Certificate),
                   reinterpret_cast<void**>(&certificateOriginal),
