@@ -29,6 +29,8 @@ namespace RR::Patches {
     static void (*removeCircuitFunctionOriginal)(void*, int32_t, void*) = nullptr;
     static RR::Config::Network networkConfig;
     static bool suppressDuidMismatch = true;
+    static bool disableTachyonEncryption = false;
+    static volatile LONG tachyonEncryptionHookState = 0; // 0=retryable, 1=installing, 2=installed
     static void* Gate(void* source) {
         // These zero-filled executable bytes were verified in the runtime Unity image.
         // Each 32-byte slot calls one GameAssembly target with Windows x64 shadow
@@ -72,6 +74,7 @@ namespace RR::Patches {
     static void* (*stringNew)(const char*) = nullptr;
     static void* (*objectClass)(void*) = nullptr;
     static void* (*objectNew)(void*) = nullptr;
+    static void* (*classFromName)(void*, const char*, const char*) = nullptr;
     static DesktopCapture::Bounds* (*desktopBounds)(DesktopCapture::Bounds*, int, void*) = nullptr;
     static void* (*byteArrayNew)(void*, size_t) = nullptr;
     static void* byteArrayClass = nullptr;
@@ -633,11 +636,92 @@ namespace RR::Patches {
     static void (*invalidateTestPlans)(void*) = nullptr;
     static std::string tachyonPublicKey;
     static void (*tachyonCtorOriginal)(void*, void*, void*, void*) = nullptr;
+    static void DisableTachyonEncryption(void*, uint64_t, void*, void*) {
+        // The configured Tachyon server accepts only plaintext 0x11 datagrams.
+        // Skipping RecRoom_SetEncryptionInfo keeps the client's layer on that path.
+    }
+    static bool TryInstallTachyonEncryptionBypass(void* anchorObject) {
+        if (!disableTachyonEncryption) {
+            return false;
+        }
+        const LONG prior = InterlockedCompareExchange(&tachyonEncryptionHookState, 1, 0);
+        if (prior == 2) {
+            return true;
+        }
+        if (prior != 0) {
+            return false;
+        }
+
+        __try {
+            void* anchorClass = objectClass ? objectClass(anchorObject) : nullptr;
+            void* image = anchorClass ? *reinterpret_cast<void**>(anchorClass) : nullptr;
+            void* transportClass = nullptr;
+            if (image && classFromName && classMethods && methodName) {
+                // The namespace is stable in the supported 20260323.14 client;
+                // retain the two historical namespace variants as safe fallbacks.
+                const char* namespaces[] = {"Netcode.Transports.LiteNetLib",
+                                            "RecRoom.RoomLoading.PhotonClients", ""};
+                for (const auto* namespaze : namespaces) {
+                    transportClass = classFromName(image, namespaze, "LiteNetLibTransport");
+                    if (transportClass) {
+                        break;
+                    }
+                }
+            }
+            if (!transportClass) {
+                InterlockedExchange(&tachyonEncryptionHookState, 0);
+                Log("[Networking] could not resolve LiteNetLibTransport in the Tachyon client image; "
+                    "encryption compatibility hook will retry");
+                return false;
+            }
+
+            void* iterator = nullptr;
+            while (void* candidate = classMethods(transportClass, &iterator)) {
+                const char* name = methodName(candidate);
+                if (!name || strcmp(name, "RecRoom_SetEncryptionInfo") != 0 ||
+                    *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(candidate) +
+                                                RR::Offsets::MethodInfo::ParameterCount) != 2) {
+                    continue;
+                }
+                const uintptr_t body = *reinterpret_cast<uintptr_t*>(
+                    reinterpret_cast<uintptr_t>(candidate) + RR::Offsets::MethodInfo::Body);
+                if (body < game || body >= game + RR::Methods::GameAssembly::ImageSize) {
+                    InterlockedExchange(&tachyonEncryptionHookState, 0);
+                    Log("[Networking] RecRoom_SetEncryptionInfo resolved outside GameAssembly; "
+                        "encryption compatibility hook skipped");
+                    return false;
+                }
+                auto target = reinterpret_cast<void*>(body);
+                const auto created = MH_CreateHook(target, reinterpret_cast<void*>(DisableTachyonEncryption),
+                                                   nullptr);
+                const auto enabled = created == MH_OK ? MH_EnableHook(target) : created;
+                if (enabled != MH_OK) {
+                    if (created == MH_OK) {
+                        MH_RemoveHook(target);
+                    }
+                    InterlockedExchange(&tachyonEncryptionHookState, 0);
+                    Log("[Networking] RecRoom_SetEncryptionInfo hook failed status=%d", enabled);
+                    return false;
+                }
+                InterlockedExchange(&tachyonEncryptionHookState, 2);
+                Log("[Networking] disabled Tachyon transport encryption for this configured plaintext server");
+                return true;
+            }
+            InterlockedExchange(&tachyonEncryptionHookState, 0);
+            Log("[Networking] RecRoom_SetEncryptionInfo(ulong, byte[]) was not found; "
+                "encryption compatibility hook will retry");
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            InterlockedExchange(&tachyonEncryptionHookState, 0);
+            Log("[Networking] encryption compatibility hook resolution fault; it will retry");
+        }
+        return false;
+    }
     static void TachyonCtor(void* instance, void* networking, void* dependencies, void* method) {
         // Let the client construct its provider first, then import the configured
         // public key through that provider's verified virtual method slot. The
         // matching private key never belongs in this process or its configuration.
         tachyonCtorOriginal(instance, networking, dependencies, method);
+        TryInstallTachyonEncryptionBypass(instance);
         if (!tachyonPublicKey.empty()) {
             auto rsa = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(instance) +
                                                      RR::Offsets::Tachyon::RsaProvider);
@@ -664,6 +748,7 @@ namespace RR::Patches {
     static void (*connectedOriginal)(void*, uint64_t, void*) = nullptr;
     static void TransportConnected(void* instance, uint64_t clientId, void* method) {
         connectedOriginal(instance, clientId, method);
+        TryInstallTachyonEncryptionBypass(instance);
         Log("[Networking] Tachyon room transport connected; client=%llu", clientId);
     }
     static void (*disconnectedOriginal)(void*, uint64_t, void*) = nullptr;
@@ -898,6 +983,7 @@ namespace RR::Patches {
         // is once per process, with no concurrent settings reload or live unload.
         networkConfig = settings.network;
         tachyonPublicKey = settings.voiceKeyXml;
+        disableTachyonEncryption = settings.disableTachyonEncryption;
         screenShareFps = settings.framesPerSecond;
         suppressDuidMismatch = settings.suppressDuidMismatch;
         game = reinterpret_cast<uintptr_t>(GetModuleHandleW(L"GameAssembly.dll"));
@@ -921,6 +1007,9 @@ namespace RR::Patches {
         stringNew = reinterpret_cast<decltype(stringNew)>(Api(176));
         objectClass = reinterpret_cast<decltype(objectClass)>(Api(132));
         objectNew = reinterpret_cast<decltype(objectNew)>(Api(135));
+        if (disableTachyonEncryption) {
+            classFromName = reinterpret_cast<decltype(classFromName)>(Api(34));
+        }
         writeBarrier = reinterpret_cast<decltype(writeBarrier)>(
             Gate(reinterpret_cast<void*>(game + RR::Methods::Il2Cpp::WriteBarrier)));
         uriString = reinterpret_cast<decltype(uriString)>(
@@ -934,7 +1023,8 @@ namespace RR::Patches {
         invalidateTestPlans = reinterpret_cast<decltype(invalidateTestPlans)>(
             Gate(reinterpret_cast<void*>(game + RR::Methods::TestCases::InvalidatePlans)));
         if (!writeBarrier || !stringNew || !objectClass || !objectNew || !uriString || !uriCtor ||
-            !clearTestCasesAndRuns || !invalidateTestPlans) {
+            !clearTestCasesAndRuns || !invalidateTestPlans ||
+            (disableTachyonEncryption && !classFromName)) {
             Log("[Build] API gates unavailable");
             return 3;
         }
@@ -1109,7 +1199,7 @@ namespace RR::Patches {
         Log("[DesktopCapture] requested refresh=%d FPS (0 preserves original presets)", screenShareFps);
         // Key replacement accompanies matchmaking's endpoint and server ID; the
         // patch never overrides the room transport address.
-        if (!tachyonPublicKey.empty()) {
+        if (!tachyonPublicKey.empty() || disableTachyonEncryption) {
             if (!Hook(RR::Methods::Tachyon::Constructor, reinterpret_cast<void*>(TachyonCtor),
                       reinterpret_cast<void**>(&tachyonCtorOriginal), "Tachyon.ctor.ConfiguredKey")) {
                 MH_Uninitialize();

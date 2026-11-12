@@ -16,6 +16,9 @@ namespace RR::Config {
         int framesPerSecond = 0;
         bool verbose = false;
         bool suppressDuidMismatch = true;
+        // Opt-in compatibility for Tachyon servers that only accept the
+        // plaintext 0x11 datagram path. This disables client transport crypto.
+        bool disableTachyonEncryption = false;
     };
 
     // Win32 INI reads return the fallback for an absent field. Empty routing
@@ -88,8 +91,10 @@ namespace RR::Config {
         if (!ReadFlag(path, L"DisableCertificatePinning", settings.network.disableCertificatePinning) ||
             !ReadFlag(path, L"AllowUnsignedImages", settings.network.allowUnsignedImages) ||
             !ReadFlag(path, L"EnableTracing", settings.verbose) ||
-            !ReadFlag(path, L"SuppressDuidMismatch", settings.suppressDuidMismatch)) {
-            error = "DisableCertificatePinning, AllowUnsignedImages, EnableTracing and SuppressDuidMismatch "
+            !ReadFlag(path, L"SuppressDuidMismatch", settings.suppressDuidMismatch) ||
+            !ReadFlag(path, L"DisableTachyonEncryption", settings.disableTachyonEncryption)) {
+            error = "DisableCertificatePinning, AllowUnsignedImages, EnableTracing, SuppressDuidMismatch "
+                    "and DisableTachyonEncryption "
                     "must be "
                     "true or false.";
             return false;

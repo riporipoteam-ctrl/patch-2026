@@ -50,6 +50,7 @@ and `Verbose` to `EnableTracing`. On/off settings accept `true`/`false` or `1`/`
 | `ServerDomain` | Service domain without a scheme, port or path. It should cover the server's service addresses, including `ApiHost` when both are set. |
 | `CachedServerDomain` | Previous server domain when migrating cached addresses. Leave blank unless your operator asks you to set it. Needs `ServerDomain`. |
 | `VoiceKeyXml` | Your operator's RSA **public** key, on one line, containing only `Modulus` and `Exponent`. Blank keeps the client's key. Never enter a private key. |
+| `DisableTachyonEncryption` | `true` disables encryption on the Tachyon UDP transport and keeps plaintext `0x11` framing. Use only with a trusted server that explicitly supports this path; default `false`. |
 | `DisableCertificatePinning` | `true` enables certificate compatibility for your configured service domain and its subdomains. Use `false` to keep original checks. |
 | `AllowUnsignedImages` | `true` accepts images without the original service's signature. This applies to all images checked by the patch. Use `false` to keep original checks. |
 | `FramesPerSecond` | `0` keeps original screen-sharing presets. Set 1-60 for a target rate; the delivered rate can be lower. Higher rates use more bandwidth. |
