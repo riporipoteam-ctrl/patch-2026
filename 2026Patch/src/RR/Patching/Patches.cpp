@@ -74,7 +74,10 @@ namespace RR::Patches {
     static void* (*stringNew)(const char*) = nullptr;
     static void* (*objectClass)(void*) = nullptr;
     static void* (*objectNew)(void*) = nullptr;
-    static void* (*classFromName)(void*, const char*, const char*) = nullptr;
+    static void* (*classFromName)(const void*, const char*, const char*) = nullptr;
+    static const void* (*domainGet)() = nullptr;
+    static const void* const* (*domainGetAssemblies)(const void*, size_t*) = nullptr;
+    static const void* (*assemblyGetImage)(const void*) = nullptr;
     static DesktopCapture::Bounds* (*desktopBounds)(DesktopCapture::Bounds*, int, void*) = nullptr;
     static void* (*byteArrayNew)(void*, size_t) = nullptr;
     static void* byteArrayClass = nullptr;
@@ -654,23 +657,38 @@ namespace RR::Patches {
 
         __try {
             void* anchorClass = objectClass ? objectClass(anchorObject) : nullptr;
-            void* image = anchorClass ? *reinterpret_cast<void**>(anchorClass) : nullptr;
             void* transportClass = nullptr;
-            if (image && classFromName && classMethods && methodName) {
+            if (anchorClass && classFromName && domainGet && domainGetAssemblies && assemblyGetImage &&
+                classMethods && methodName) {
                 // The namespace is stable in the supported 20260323.14 client;
-                // retain the two historical namespace variants as safe fallbacks.
+                // retain the historical namespace variants as safe fallbacks.
                 const char* namespaces[] = {"Netcode.Transports.LiteNetLib",
                                             "RecRoom.RoomLoading.PhotonClients", ""};
-                for (const auto* namespaze : namespaces) {
-                    transportClass = classFromName(image, namespaze, "LiteNetLibTransport");
-                    if (transportClass) {
-                        break;
+                const void* domain = domainGet();
+                size_t assemblyCount = 0;
+                const void* const* assemblies = domain ? domainGetAssemblies(domain, &assemblyCount) : nullptr;
+                if (!assemblies || assemblyCount == 0 || assemblyCount > 4096) {
+                    InterlockedExchange(&tachyonEncryptionHookState, 0);
+                    Log("[Networking] could not enumerate loaded IL2CPP assemblies; "
+                        "encryption compatibility hook will retry");
+                    return false;
+                }
+                for (size_t i = 0; i < assemblyCount && !transportClass; ++i) {
+                    const void* image = assemblyGetImage(assemblies[i]);
+                    if (!image) {
+                        continue;
+                    }
+                    for (const auto* namespaze : namespaces) {
+                        transportClass = classFromName(image, namespaze, "LiteNetLibTransport");
+                        if (transportClass) {
+                            break;
+                        }
                     }
                 }
             }
             if (!transportClass) {
                 InterlockedExchange(&tachyonEncryptionHookState, 0);
-                Log("[Networking] could not resolve LiteNetLibTransport in the Tachyon client image; "
+                Log("[Networking] could not resolve LiteNetLibTransport in loaded IL2CPP assemblies; "
                     "encryption compatibility hook will retry");
                 return false;
             }
@@ -1011,6 +1029,9 @@ namespace RR::Patches {
         objectNew = reinterpret_cast<decltype(objectNew)>(Api(135));
         if (disableTachyonEncryption) {
             classFromName = reinterpret_cast<decltype(classFromName)>(Api(34));
+            assemblyGetImage = reinterpret_cast<decltype(assemblyGetImage)>(Api(24));
+            domainGet = reinterpret_cast<decltype(domainGet)>(Api(75));
+            domainGetAssemblies = reinterpret_cast<decltype(domainGetAssemblies)>(Api(77));
         }
         writeBarrier = reinterpret_cast<decltype(writeBarrier)>(
             Gate(reinterpret_cast<void*>(game + RR::Methods::Il2Cpp::WriteBarrier)));
@@ -1029,7 +1050,8 @@ namespace RR::Patches {
             Log("[Build] API gates unavailable");
             return 3;
         }
-        if (disableTachyonEncryption && !classFromName) {
+        if (disableTachyonEncryption &&
+            (!classFromName || !assemblyGetImage || !domainGet || !domainGetAssemblies)) {
             Log("[Build] API gates unavailable");
             return 3;
         }
