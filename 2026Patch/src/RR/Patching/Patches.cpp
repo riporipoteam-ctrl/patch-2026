@@ -684,7 +684,8 @@ namespace RR::Patches {
                     continue;
                 }
                 const uintptr_t methodAddress = reinterpret_cast<uintptr_t>(candidate);
-                const uintptr_t body = *reinterpret_cast<uintptr_t*>(methodAddress + RR::Offsets::MethodInfo::Body);
+                const uintptr_t bodyInfo = methodAddress + RR::Offsets::MethodInfo::Body;
+                const uintptr_t body = *reinterpret_cast<uintptr_t*>(bodyInfo);
                 if (body < game || body >= game + RR::Methods::GameAssembly::ImageSize) {
                     InterlockedExchange(&tachyonEncryptionHookState, 0);
                     Log("[Networking] RecRoom_SetEncryptionInfo resolved outside GameAssembly; "
