@@ -683,9 +683,8 @@ namespace RR::Patches {
                                                 RR::Offsets::MethodInfo::ParameterCount) != 2) {
                     continue;
                 }
-                const uintptr_t body =
-                    *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(candidate) +
-                                                   RR::Offsets::MethodInfo::Body);
+                const uintptr_t body = *reinterpret_cast<uintptr_t*>(
+                    reinterpret_cast<uintptr_t>(candidate) + RR::Offsets::MethodInfo::Body);
                 if (body < game || body >= game + RR::Methods::GameAssembly::ImageSize) {
                     InterlockedExchange(&tachyonEncryptionHookState, 0);
                     Log("[Networking] RecRoom_SetEncryptionInfo resolved outside GameAssembly; "
@@ -1025,8 +1024,11 @@ namespace RR::Patches {
         invalidateTestPlans = reinterpret_cast<decltype(invalidateTestPlans)>(
             Gate(reinterpret_cast<void*>(game + RR::Methods::TestCases::InvalidatePlans)));
         if (!writeBarrier || !stringNew || !objectClass || !objectNew || !uriString || !uriCtor ||
-            !clearTestCasesAndRuns || !invalidateTestPlans ||
-            (disableTachyonEncryption && !classFromName)) {
+            !clearTestCasesAndRuns || !invalidateTestPlans) {
+            Log("[Build] API gates unavailable");
+            return 3;
+        }
+        if (disableTachyonEncryption && !classFromName) {
             Log("[Build] API gates unavailable");
             return 3;
         }
