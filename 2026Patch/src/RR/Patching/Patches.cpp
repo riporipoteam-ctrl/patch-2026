@@ -666,7 +666,10 @@ namespace RR::Patches {
                                             "RecRoom.RoomLoading.PhotonClients", ""};
                 const void* domain = domainGet();
                 size_t assemblyCount = 0;
-                const void* const* assemblies = domain ? domainGetAssemblies(domain, &assemblyCount) : nullptr;
+                const void* const* assemblies = nullptr;
+                if (domain) {
+                    assemblies = domainGetAssemblies(domain, &assemblyCount);
+                }
                 if (!assemblies || assemblyCount == 0 || assemblyCount > 4096) {
                     InterlockedExchange(&tachyonEncryptionHookState, 0);
                     Log("[Networking] could not enumerate loaded IL2CPP assemblies; "
