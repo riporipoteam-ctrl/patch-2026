@@ -683,8 +683,9 @@ namespace RR::Patches {
                                                 RR::Offsets::MethodInfo::ParameterCount) != 2) {
                     continue;
                 }
-                const uintptr_t body = *reinterpret_cast<uintptr_t*>(
-                    reinterpret_cast<uintptr_t>(candidate) + RR::Offsets::MethodInfo::Body);
+                const uintptr_t body =
+                    *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(candidate) +
+                                                   RR::Offsets::MethodInfo::Body);
                 if (body < game || body >= game + RR::Methods::GameAssembly::ImageSize) {
                     InterlockedExchange(&tachyonEncryptionHookState, 0);
                     Log("[Networking] RecRoom_SetEncryptionInfo resolved outside GameAssembly; "
@@ -692,8 +693,8 @@ namespace RR::Patches {
                     return false;
                 }
                 auto target = reinterpret_cast<void*>(body);
-                const auto created = MH_CreateHook(target, reinterpret_cast<void*>(DisableTachyonEncryption),
-                                                   nullptr);
+                const auto created =
+                    MH_CreateHook(target, reinterpret_cast<void*>(DisableTachyonEncryption), nullptr);
                 const auto enabled = created == MH_OK ? MH_EnableHook(target) : created;
                 if (enabled != MH_OK) {
                     if (created == MH_OK) {
@@ -704,7 +705,8 @@ namespace RR::Patches {
                     return false;
                 }
                 InterlockedExchange(&tachyonEncryptionHookState, 2);
-                Log("[Networking] disabled Tachyon transport encryption for this configured plaintext server");
+                Log("[Networking] disabled Tachyon transport encryption for this configured "
+                    "plaintext server");
                 return true;
             }
             InterlockedExchange(&tachyonEncryptionHookState, 0);
