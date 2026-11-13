@@ -96,7 +96,7 @@ namespace RR::Config {
     }
 
     struct Network {
-        std::string apiHost, serverDomain, cachedServerDomain;
+        std::string apiHost, serverDomain, cachedServerDomain, roomieRealtimeHost;
         bool disableCertificatePinning = false;
         bool allowUnsignedImages = false;
 
@@ -117,7 +117,9 @@ namespace RR::Config {
             }
             return (serverDomain.empty() || Host(serverDomain)) &&
                    (apiHost.empty() || serverDomain.empty() || InDomain(url.host, serverDomain)) &&
-                   (cachedServerDomain.empty() || Host(cachedServerDomain));
+                   (cachedServerDomain.empty() || Host(cachedServerDomain)) &&
+                   (roomieRealtimeHost.empty() || (Host(roomieRealtimeHost) && !serverDomain.empty() &&
+                                                   InDomain(roomieRealtimeHost, serverDomain)));
         }
 
         // ns.rec.net is the stock client's discovery seam, not an operator

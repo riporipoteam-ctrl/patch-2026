@@ -633,6 +633,19 @@ namespace RR::Patches {
     static void (*invalidateTestPlans)(void*) = nullptr;
     static std::string tachyonPublicKey;
     static void (*tachyonCtorOriginal)(void*, void*, void*, void*) = nullptr;
+    static void (*setEncryptionInfoOriginal)(void*, uint64_t, void*, void*) = nullptr;
+    static void SetEncryptionInfo(void* transport, uint64_t clientId, void* key, void* method) {
+        // Flux Rec's compatible server uses the client's documented 0x11
+        // plaintext framing on both directions. The stock callback otherwise
+        // arms 0x2A encryption with a Burst cipher the server cannot decode.
+        // Scope this to an explicitly configured Tachyon key; preserve stock
+        // transport behavior in every other installation.
+        if (tachyonPublicKey.empty()) {
+            setEncryptionInfoOriginal(transport, clientId, key, method);
+            return;
+        }
+        Log("[Networking] Flux Rec transport remains on 0x11 framing after approval; client=%llu", clientId);
+    }
     static void TachyonCtor(void* instance, void* networking, void* dependencies, void* method) {
         // Let the client construct its provider first, then import the configured
         // public key through that provider's verified virtual method slot. The
@@ -725,6 +738,47 @@ namespace RR::Patches {
         output.resize(bytes);
         return WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, chars, length, output.data(), bytes,
                                    nullptr, nullptr) == bytes;
+    }
+    static void (*roomieUriCtorOriginal)(void*, void*, void*) = nullptr;
+    static LONG roomieUriObserved = 0;
+    static LONG roomieUriRedirected = 0;
+    static void RoomieUriCtor(void* instance, void* text, void* method) {
+        // Roomie uses the normal HTTPS endpoint. Some client code spells the
+        // default TLS port explicitly; normalize that authority too, while
+        // preserving the original path, query and fragment byte-for-byte.
+        try {
+            std::string value;
+            RR::Config::Url url;
+            if (StringUtf8(text, value) && RR::Config::ParseUrl(value, url)) {
+                const bool provider = url.scheme == "https" && url.host == "api.openai.com";
+                const bool defaultTlsPort = url.port.empty() || url.port == "443";
+                const bool realtimeRoute = url.authorityEnd == value.size() ||
+                                           value[url.authorityEnd] == '?' ||
+                                           value.compare(url.authorityEnd, 12, "/v1/realtime") == 0 ||
+                                           value.substr(url.authorityEnd) == "/";
+                if (provider && InterlockedCompareExchange(&roomieUriObserved, 1, 0) == 0) {
+                    Log("[Roomie] realtime URI observed explicit_tls_port=%d route_match=%d",
+                        url.port.empty() ? 0 : 1, realtimeRoute ? 1 : 0);
+                }
+                if (!provider || !defaultTlsPort || !realtimeRoute) {
+                    roomieUriCtorOriginal(instance, text, method);
+                    return;
+                }
+                std::string replacement = value;
+                replacement.replace(url.authorityStart, url.authorityEnd - url.authorityStart,
+                                    networkConfig.roomieRealtimeHost);
+                if (void* rewritten = stringNew(replacement.c_str())) {
+                    if (InterlockedCompareExchange(&roomieUriRedirected, 1, 0) == 0) {
+                        Log("[Roomie] realtime URI redirected to configured worker");
+                    }
+                    roomieUriCtorOriginal(instance, rewritten, method);
+                    return;
+                }
+            }
+        } catch (...) {
+            LogVerbose("[Roomie] URI redirect failed; original retained");
+        }
+        roomieUriCtorOriginal(instance, text, method);
     }
     // Runtime schema and disassembly verify this static signature on 20260323.14.
     // Observe the reason before the client discards its message; preserve shutdown.
@@ -1019,7 +1073,10 @@ namespace RR::Patches {
         } else {
             Log("[DesktopCapture] Windows capture initialization failed");
         }
-        if (!Hook(RR::Methods::HTTP::SendRequest, reinterpret_cast<void*>(Send),
+        if ((!networkConfig.roomieRealtimeHost.empty() &&
+             !Hook(RR::Methods::Uri::Constructor, reinterpret_cast<void*>(RoomieUriCtor),
+                   reinterpret_cast<void**>(&roomieUriCtorOriginal), "Roomie.RealtimeOrigin")) ||
+            !Hook(RR::Methods::HTTP::SendRequest, reinterpret_cast<void*>(Send),
                   reinterpret_cast<void**>(&sendOriginal), "HTTPManager.SendRequest") ||
             !Hook(RR::Methods::HTTP::NotifyServerCertificate, reinterpret_cast<void*>(Certificate),
                   reinterpret_cast<void**>(&certificateOriginal),
@@ -1110,6 +1167,12 @@ namespace RR::Patches {
         // Key replacement accompanies matchmaking's endpoint and server ID; the
         // patch never overrides the room transport address.
         if (!tachyonPublicKey.empty()) {
+            if (!Hook(RR::Methods::Tachyon::SetEncryptionInfo, reinterpret_cast<void*>(SetEncryptionInfo),
+                      reinterpret_cast<void**>(&setEncryptionInfoOriginal),
+                      "Tachyon.SetEncryptionInfo.Plaintext")) {
+                MH_Uninitialize();
+                return 9;
+            }
             if (!Hook(RR::Methods::Tachyon::Constructor, reinterpret_cast<void*>(TachyonCtor),
                       reinterpret_cast<void**>(&tachyonCtorOriginal), "Tachyon.ctor.ConfiguredKey")) {
                 MH_Uninitialize();
