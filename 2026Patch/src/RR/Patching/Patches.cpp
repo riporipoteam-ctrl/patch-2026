@@ -752,7 +752,8 @@ namespace RR::Patches {
             if (StringUtf8(text, value) && RR::Config::ParseUrl(value, url)) {
                 const bool provider = url.scheme == "https" && url.host == "api.openai.com";
                 const bool defaultTlsPort = url.port.empty() || url.port == "443";
-                const bool realtimeRoute = url.authorityEnd == value.size() || value[url.authorityEnd] == '?' ||
+                const bool realtimeRoute = url.authorityEnd == value.size() ||
+                                           value[url.authorityEnd] == '?' ||
                                            value.compare(url.authorityEnd, 12, "/v1/realtime") == 0 ||
                                            value.substr(url.authorityEnd) == "/";
                 if (provider && InterlockedCompareExchange(&roomieUriObserved, 1, 0) == 0) {
@@ -1167,7 +1168,8 @@ namespace RR::Patches {
         // patch never overrides the room transport address.
         if (!tachyonPublicKey.empty()) {
             if (!Hook(RR::Methods::Tachyon::SetEncryptionInfo, reinterpret_cast<void*>(SetEncryptionInfo),
-                      reinterpret_cast<void**>(&setEncryptionInfoOriginal), "Tachyon.SetEncryptionInfo.Plaintext")) {
+                      reinterpret_cast<void**>(&setEncryptionInfoOriginal),
+                      "Tachyon.SetEncryptionInfo.Plaintext")) {
                 MH_Uninitialize();
                 return 9;
             }
