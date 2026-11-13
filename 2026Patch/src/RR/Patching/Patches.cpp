@@ -633,6 +633,19 @@ namespace RR::Patches {
     static void (*invalidateTestPlans)(void*) = nullptr;
     static std::string tachyonPublicKey;
     static void (*tachyonCtorOriginal)(void*, void*, void*, void*) = nullptr;
+    static void (*setEncryptionInfoOriginal)(void*, uint64_t, void*, void*) = nullptr;
+    static void SetEncryptionInfo(void* transport, uint64_t clientId, void* key, void* method) {
+        // Flux Rec's compatible server uses the client's documented 0x11
+        // plaintext framing on both directions. The stock callback otherwise
+        // arms 0x2A encryption with a Burst cipher the server cannot decode.
+        // Scope this to an explicitly configured Tachyon key; preserve stock
+        // transport behavior in every other installation.
+        if (tachyonPublicKey.empty()) {
+            setEncryptionInfoOriginal(transport, clientId, key, method);
+            return;
+        }
+        Log("[Networking] Flux Rec transport remains on 0x11 framing after approval; client=%llu", clientId);
+    }
     static void TachyonCtor(void* instance, void* networking, void* dependencies, void* method) {
         // Let the client construct its provider first, then import the configured
         // public key through that provider's verified virtual method slot. The
@@ -1153,6 +1166,11 @@ namespace RR::Patches {
         // Key replacement accompanies matchmaking's endpoint and server ID; the
         // patch never overrides the room transport address.
         if (!tachyonPublicKey.empty()) {
+            if (!Hook(RR::Methods::Tachyon::SetEncryptionInfo, reinterpret_cast<void*>(SetEncryptionInfo),
+                      reinterpret_cast<void**>(&setEncryptionInfoOriginal), "Tachyon.SetEncryptionInfo.Plaintext")) {
+                MH_Uninitialize();
+                return 9;
+            }
             if (!Hook(RR::Methods::Tachyon::Constructor, reinterpret_cast<void*>(TachyonCtor),
                       reinterpret_cast<void**>(&tachyonCtorOriginal), "Tachyon.ctor.ConfiguredKey")) {
                 MH_Uninitialize();

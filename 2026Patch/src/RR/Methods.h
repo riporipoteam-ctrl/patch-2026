@@ -99,6 +99,9 @@ namespace RR::Methods::Netcode {
 
 namespace RR::Methods::Tachyon {
     inline constexpr uintptr_t Constructor = 0x9AA3DD0;
+    // 20260323.14 live call from NetworkManager_OnClientConnectedCallback at
+    // 0x9AA30BD: (transport, clientId, sessionKey, MethodInfo*).
+    inline constexpr uintptr_t SetEncryptionInfo = 0x8BAC840;
     inline constexpr uintptr_t Connected = 0x9AA2CE0;
     inline constexpr uintptr_t Disconnected = 0x9AA3390;
     inline constexpr uintptr_t Failure = 0x9AA3470;
