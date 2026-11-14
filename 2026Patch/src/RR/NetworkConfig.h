@@ -131,6 +131,26 @@ namespace RR::Config {
             if (!ParseUrl(value, url)) {
                 return false;
             }
+            // The 2026 client still requests stock room and user images from
+            // img.rec.net. Serve those keys through the maintained image edge;
+            // keep the path, query (including signature), and any explicit port.
+            if (url.host == "img.rec.net" &&
+                (url.scheme == "https" || url.scheme == "http")) {
+                const auto authority = "img.recflare.net" +
+                                       (url.port.empty() ? std::string() : ":" + url.port);
+                value.replace(url.authorityStart, url.authorityEnd - url.authorityStart, authority);
+                return true;
+            }
+            // Room thumbnails and room saves share the CDN worker's `room/`
+            // namespace. Route the stock CDN host to the configured worker while
+            // leaving the asset path and any explicit port untouched.
+            if (url.host == "cdn.rec.net" && !serverDomain.empty() &&
+                (url.scheme == "https" || url.scheme == "http")) {
+                const auto authority = "cdn." + serverDomain +
+                                       (url.port.empty() ? std::string() : ":" + url.port);
+                value.replace(url.authorityStart, url.authorityEnd - url.authorityStart, authority);
+                return true;
+            }
             if (!apiHost.empty() && url.host == "ns.rec.net" &&
                 (url.scheme == "https" || url.scheme == "http")) {
                 if (ApiOrigin()) {
